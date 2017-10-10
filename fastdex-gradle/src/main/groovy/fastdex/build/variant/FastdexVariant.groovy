@@ -4,11 +4,13 @@ import com.android.build.api.transform.TransformInvocation
 import com.android.build.gradle.api.ApplicationVariant
 import com.github.typ0520.fastdex.Version
 import fastdex.build.extension.FastdexExtension
+import fastdex.build.lib.snapshoot.sourceset.PathInfo
 import fastdex.build.task.FastdexInstantRunTask
 import fastdex.build.transform.FastdexTransform
 import fastdex.build.util.Constants
 import fastdex.build.util.FastdexInstantRun
 import fastdex.build.util.FastdexRuntimeException
+import fastdex.common.ShareConstants
 import fastdex.common.utils.SerializeUtils
 import fastdex.build.util.LibDependency
 import fastdex.build.util.MetaInfo
@@ -33,14 +35,15 @@ public class FastdexVariant {
     final ProjectSnapshoot projectSnapshoot
     final TagManager tagManager
     final Set<LibDependency> libraryDependencies
+
     String originPackageName
     String mergedPackageName
     boolean hasDexCache
     boolean firstPatchBuild
     boolean initialized
-    boolean executedJarMerge
-    boolean executedDexTransform
+    boolean needExecDexMerge
     boolean hasJarMergingTask
+    boolean compiledByCustomJavac
     MetaInfo metaInfo
     FastdexTransform fastdexTransform
     FastdexInstantRun fastdexInstantRun
@@ -185,6 +188,18 @@ public class FastdexVariant {
         }
 
         projectSnapshoot.prepareEnv()
+        if (hasDexCache) {
+            Set<PathInfo> addOrModifiedPathInfos = new HashSet<>()
+            File aptDir = GradleUtils.getAptOutputDir(androidVariant)
+
+            for (PathInfo pathInfo : projectSnapshoot.diffResultSet.addOrModifiedPathInfos) {
+                //忽略掉apt目录
+                if (!aptDir.equals(new File(pathInfo.path))) {
+                    addOrModifiedPathInfos.add(pathInfo)
+                }
+            }
+            needExecDexMerge = addOrModifiedPathInfos.size() >= configuration.dexMergeThreshold
+        }
         fastdexInstantRun.onFastdexPrepare()
     }
 
@@ -280,7 +295,8 @@ public class FastdexVariant {
      * @return
      */
     def willExecDexMerge() {
-        return hasDexCache && projectSnapshoot.diffResultSet.changedJavaFileDiffInfos.size() >= configuration.dexMergeThreshold
+        return needExecDexMerge
+        //return hasDexCache && projectSnapshoot.diffResultSet.changedJavaFileDiffInfos.size() >= configuration.dexMergeThreshold
     }
 
     def getVariantConfiguration() {

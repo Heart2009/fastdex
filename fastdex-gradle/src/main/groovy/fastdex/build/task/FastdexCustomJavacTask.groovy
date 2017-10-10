@@ -14,6 +14,12 @@ import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.TaskAction
 
+import java.nio.file.FileVisitResult
+import java.nio.file.Path
+import java.nio.file.Files
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
+
 /**
  * 每次SourceSet下的某个java文件变化时，默认的compile${variantName}JavaWithJavac任务会扫描所有的java文件
  * 处理javax.annotation.processing.AbstractProcessor接口用来代码动态代码生成，所以项目中的java文件如果很多会造成大量的时间浪费
@@ -111,6 +117,11 @@ public class FastdexCustomJavacTask extends DefaultTask {
         //compile java
         File androidJar = new File("${FastdexUtils.getSdkDirectory(project)}${File.separator}platforms${File.separator}${project.android.getCompileSdkVersion()}${File.separator}android.jar")
 
+        //class输出目录
+        File patchClassesDir = new File(FastdexUtils.getWorkDir(project,fastdexVariant.variantName),"patch-classes")
+        FileUtils.deleteDir(patchClassesDir)
+        FileUtils.ensumeDir(patchClassesDir)
+
         def classpath = new ArrayList()
         classpath.add(classesDir.absolutePath)
         classpath.add(androidJar.absolutePath)
@@ -156,6 +167,8 @@ public class FastdexCustomJavacTask extends DefaultTask {
                 project.logger.error("==fastdex skip kotlin file: ${pathInfo.relativePath}")
             }
         }
+
+        //TODO 如果只有R.java 或者 BuildConfig.java发生变化可以不用加-cp、-processor会不会快一些
 
         def aptConfiguration = project.configurations.findByName("apt")
         def isAptEnabled = (project.plugins.hasPlugin("android-apt") || project.plugins.hasPlugin("com.neenbedankt.android-apt")) && aptConfiguration != null && !aptConfiguration.empty
@@ -218,7 +231,7 @@ public class FastdexCustomJavacTask extends DefaultTask {
         }
 
         cmdArgs.add("-d")
-        cmdArgs.add(classesDir.absolutePath)
+        cmdArgs.add(patchClassesDir.absolutePath)
 
         StringBuilder cmd = new StringBuilder()
         String[] cmdArr = new String[cmdArgs.size()]
@@ -257,6 +270,33 @@ public class FastdexCustomJavacTask extends DefaultTask {
         }
 
         if (status == 0) {
+            println "==哈哈 ${fastdexVariant.willExecDexMerge()}"
+
+            println "==哈哈 ${fastdexVariant.projectSnapshoot.diffResultSet.changedJavaFileDiffInfos}"
+
+            //覆盖app/build/intermediates/classes内容
+            Files.walkFileTree(patchClassesDir.toPath(),new SimpleFileVisitor<Path>(){
+                @Override
+                FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Path relativePath = patchClassesDir.toPath().relativize(file)
+
+                    File destFile = new File(classesDir,relativePath.toString())
+                    FileUtils.copyFileUsingStream(file.toFile(),destFile)
+
+                    project.logger.error("==fastdex apply class to ${destFile}")
+
+                    String classRelativePath = relativePath.toString()
+                    classRelativePath = classRelativePath.substring(0, classRelativePath.length() - ShareConstants.CLASS_SUFFIX.length());
+                    classRelativePath = classRelativePath.replaceAll(Os.isFamily(Os.FAMILY_WINDOWS) ? "\\\\" : File.separator,"\\.");
+                    sourceSetDiffResultSet.addOrModifiedClasses.add(classRelativePath)
+                    return FileVisitResult.CONTINUE
+                }
+            })
+
+            println "==哈哈2 ${fastdexVariant.willExecDexMerge()}"
+
+            fastdexVariant.compiledByCustomJavac = true
+
             long end = System.currentTimeMillis()
             project.logger.error("==fastdex javac success, use: ${end - start}ms")
         }

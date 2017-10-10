@@ -200,8 +200,6 @@ class FastdexTransform extends TransformProxy {
             fastdexVariant.onDexGenerateSuccess(true,false)
             project.logger.error("==fastdex normal transform end")
         }
-
-        fastdexVariant.executedDexTransform = true
     }
 
     public void copyFastdexRuntimeDex(File dist) {

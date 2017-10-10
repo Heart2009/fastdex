@@ -72,7 +72,7 @@ public class ClassInject implements Opcodes {
         def project = fastdexVariant.project
         long start = System.currentTimeMillis()
         for (File classpathFile : directoryInputFiles) {
-            project.logger.error("====fastdex ==inject dir: ${classpathFile.getAbsolutePath()}====")
+            project.logger.error("====fastdex inject dir: ${classpathFile.getAbsolutePath()}====")
             ClassInject.injectDirectory(fastdexVariant,classpathFile,true)
         }
         long end = System.currentTimeMillis()
@@ -102,7 +102,7 @@ public class ClassInject implements Opcodes {
             if (!projectJarFiles.contains(file)) {
                 continue
             }
-            project.logger.error("==fastdex ==inject jar: ${file}")
+            project.logger.error("==fastdex inject jar: ${file}")
             ClassInject.injectJar(fastdexVariant,file,file)
         }
         long end = System.currentTimeMillis()
