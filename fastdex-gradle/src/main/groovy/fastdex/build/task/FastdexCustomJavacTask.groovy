@@ -5,6 +5,7 @@ import fastdex.build.lib.snapshoot.sourceset.SourceSetDiffResultSet
 import fastdex.build.util.Constants
 import fastdex.build.util.FastdexRuntimeException
 import fastdex.build.util.FastdexUtils
+import fastdex.build.util.GradleUtils
 import fastdex.common.ShareConstants
 import fastdex.common.utils.FileUtils
 import fastdex.build.variant.FastdexVariant
@@ -83,10 +84,18 @@ public class FastdexCustomJavacTask extends DefaultTask {
         }
 
         Set<PathInfo> addOrModifiedPathInfos = new HashSet<>()
+        File aptDir = GradleUtils.getAptOutputDir(fastdexVariant.androidVariant)
 
         for (PathInfo pathInfo : sourceSetDiffResultSet.addOrModifiedPathInfosMap.get(project.projectDir.absolutePath)) {
+            //忽略掉kotlin文件
             if (pathInfo.relativePath.endsWith(ShareConstants.JAVA_SUFFIX)) {
-                addOrModifiedPathInfos.add(pathInfo)
+                //忽略掉apt目录的java文件
+                if (aptDir.equals(new File(pathInfo.path))) {
+                    project.logger.error("==fastdex skip apt output file: ${pathInfo.relativePath}")
+                }
+                else {
+                    addOrModifiedPathInfos.add(pathInfo)
+                }
             }
             else {
                 project.logger.error("==fastdex skip kotlin file: ${pathInfo.relativePath}")
@@ -149,7 +158,7 @@ public class FastdexCustomJavacTask extends DefaultTask {
         }
 
         def aptConfiguration = project.configurations.findByName("apt")
-        def isAptEnabled = project.plugins.hasPlugin("android-apt") && aptConfiguration != null && !aptConfiguration.empty
+        def isAptEnabled = (project.plugins.hasPlugin("android-apt") || project.plugins.hasPlugin("com.neenbedankt.android-apt")) && aptConfiguration != null && !aptConfiguration.empty
 
         def annotationProcessorConfig = project.configurations.findByName("annotationProcessor")
         def isAnnotationProcessor = annotationProcessorConfig != null && !annotationProcessorConfig.empty
@@ -220,6 +229,8 @@ public class FastdexCustomJavacTask extends DefaultTask {
 
         long start = System.currentTimeMillis()
 
+        project.logger.error("\n${cmd}\n")
+
         ProcessBuilder processBuilder = new ProcessBuilder(cmdArr)
         def process = processBuilder.start()
 
@@ -245,15 +256,12 @@ public class FastdexCustomJavacTask extends DefaultTask {
 
         }
 
-        if (status != 0) {
-            throw new FastdexRuntimeException("==fastdex javac fail: \n${cmd}")
+        if (status == 0) {
+            long end = System.currentTimeMillis()
+            project.logger.error("==fastdex javac success, use: ${end - start}ms")
         }
         else {
-            long end = System.currentTimeMillis()
-            if (project.fastdex.debug) {
-                project.logger.error("${cmd}")
-            }
-            project.logger.error("==fastdex javac success, use: ${end - start}ms")
+            throw new FastdexRuntimeException("javac exec fail....")
         }
         disableJavaCompile(true)
         //保存对比信息

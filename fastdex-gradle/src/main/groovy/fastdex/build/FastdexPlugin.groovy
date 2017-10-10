@@ -1,6 +1,7 @@
 package fastdex.build
 
 import com.android.build.api.transform.Transform
+import com.android.build.gradle.api.ApplicationVariant
 import com.android.build.gradle.internal.pipeline.TransformTask
 import com.android.build.gradle.internal.transforms.DexTransform
 import com.android.build.gradle.internal.transforms.JarMergingTransform
@@ -13,7 +14,6 @@ import fastdex.build.task.FastdexPatchTask
 import fastdex.build.task.FastdexResourceIdTask
 import fastdex.build.transform.FastdexJarMergingTransform
 import fastdex.build.util.FastdexBuildListener
-import fastdex.build.util.Constants
 import fastdex.build.util.FastdexInstantRun
 import fastdex.build.util.FastdexUtils
 import fastdex.build.util.GradleUtils
@@ -47,24 +47,20 @@ class FastdexPlugin implements Plugin<Project> {
 
         project.afterEvaluate {
             def configuration = project.fastdex
+
+            //如果是fastdex的插件触发的打包，开启hook
+            if (hasProperty("fastdex.injected.invoked.from.ide")) {
+                configuration.fastdexEnable = true
+            }
             if (!configuration.fastdexEnable) {
                 project.logger.error("====fastdex tasks are disabled.====")
                 return
             }
 
-            if (FastdexUtils.isDataBindingEnabled(project)) {
-                //最低支持2.2.0
-                String minSupportVersion = "2.2.0"
-                if (GradleUtils.getAndroidGradlePluginVersion().compareTo(minSupportVersion) < 0) {
-                    throw new GradleException("DataBinding enabled, minimum support version ${minSupportVersion}")
-                }
-            }
-            else {
-                //最低支持2.0.0
-                String minSupportVersion = "2.0.0"
-                if (GradleUtils.getAndroidGradlePluginVersion().compareTo(minSupportVersion) < 0) {
-                    throw new GradleException("Your version too old 'com.android.tools.build:gradle:${GradleUtils.getAndroidGradlePluginVersion()}', minimum support version ${minSupportVersion}")
-                }
+            //最低支持2.0.0
+            String minSupportVersion = "2.0.0"
+            if (GradleUtils.getAndroidGradlePluginVersion().compareTo(minSupportVersion) < 0) {
+                throw new GradleException("Your version too old 'com.android.tools.build:gradle:${GradleUtils.getAndroidGradlePluginVersion()}', minimum support version ${minSupportVersion}")
             }
 
             def android = project.extensions.android
@@ -78,6 +74,9 @@ class FastdexPlugin implements Plugin<Project> {
             }
 
             project.tasks.create("fastdexCleanAll", FastdexCleanTask)
+
+            def aptConfiguration = project.configurations.findByName("apt")
+            def isAptEnabled = (project.plugins.hasPlugin("android-apt") || project.plugins.hasPlugin("com.neenbedankt.android-apt")) && aptConfiguration != null && !aptConfiguration.empty
 
             android.applicationVariants.each { variant ->
                 def variantOutput = variant.outputs.first()
@@ -96,6 +95,10 @@ class FastdexPlugin implements Plugin<Project> {
                 } catch (UnknownTaskException e) {
                     // Not in instant run mode, continue.
                 }
+
+                def javaCompile = variant.hasProperty('javaCompiler') ? variant.javaCompiler : variant.javaCompile
+
+                ensumeAptOutputDir(project, isAptEnabled, javaCompile, variant)
 
                 FastdexVariant fastdexVariant = new FastdexVariant(project,variant)
                 fastdexVariant.fastdexInstantRun = new FastdexInstantRun(fastdexVariant)
@@ -171,23 +174,23 @@ class FastdexPlugin implements Plugin<Project> {
                     }
 
                     Task transformClassesWithDex = getTransformClassesWithDex(project,variantName)
-                    if (FastdexUtils.isDataBindingEnabled(project)) {
-                        transformClassesWithDex.dependsOn prepareTask
-                        prepareTask.mustRunAfter variant.javaCompile
-                    }
-                    else {
+                    if (configuration.useCustomCompile) {
                         if (configuration.useCustomCompile) {
                             Task customJavacTask = project.tasks.create("fastdexCustomCompile${variantName}JavaWithJavac", FastdexCustomJavacTask)
                             customJavacTask.fastdexVariant = fastdexVariant
-                            customJavacTask.javaCompile = variant.javaCompile
+                            customJavacTask.javaCompile = javaCompile
                             customJavacTask.javacIncrementalSafeguard = getJavacIncrementalSafeguardTask(project, variantName)
 
                             customJavacTask.dependsOn prepareTask
-                            variant.javaCompile.dependsOn customJavacTask
+                            javaCompile.dependsOn customJavacTask
                         }
                         else {
-                            variant.javaCompile.dependsOn prepareTask
+                            javaCompile.dependsOn prepareTask
                         }
+                    }
+                    else {
+                        transformClassesWithDex.dependsOn prepareTask
+                        prepareTask.mustRunAfter javaCompile
                     }
 
                     Task multidexlistTask = getTransformClassesWithMultidexlistTask(project,variantName)
@@ -287,6 +290,59 @@ class FastdexPlugin implements Plugin<Project> {
                 }
             }
         }
+    }
+
+    def ensumeAptOutputDir(Project project, boolean isAptEnabled, Object javaCompile, ApplicationVariant variant) {
+        //2.2.0之前的版本java编译任务没有指定-s参数，需要自己指定到apt目录
+        if (isAptEnabled) {
+            return
+        }
+        if (GradleUtils.getAndroidGradlePluginVersion().compareTo("2.2.0") >= 0) {
+            return
+        }
+
+        def aptOutputDir = new File(variant.getVariantData().getScope().getGlobalScope().getGeneratedDir(), "/source/apt")
+        def aptOutput = new File(aptOutputDir, variant.dirName)
+
+        if (variant.variantData.extraGeneratedSourceFolders == null || !variant.variantData.extraGeneratedSourceFolders.contains(aptOutput)) {
+            variant.addJavaSourceFoldersToModel(aptOutput);
+        }
+
+        javaCompile.doFirst {
+            if (!aptOutput.exists()) {
+                aptOutput.mkdirs()
+            }
+        }
+
+        if (javaCompile.options.compilerArgs == null) {
+            javaCompile.options.compilerArgs = new ArrayList<>()
+        }
+
+        def compilerArgs = new ArrayList<>()
+        compilerArgs.addAll(javaCompile.options.compilerArgs)
+
+        boolean discoveryAptOutput = false
+        def originAptOutput = null
+
+        for (Object obj : compilerArgs) {
+            if (discoveryAptOutput) {
+                originAptOutput = obj
+                break
+            }
+            if ("-s".equals(obj)) {
+                discoveryAptOutput = true
+            }
+        }
+
+        if (discoveryAptOutput) {
+            compilerArgs.remove("-s")
+            compilerArgs.remove(originAptOutput)
+        }
+        compilerArgs.add(0,"-s")
+        compilerArgs.add(1,aptOutput)
+
+        javaCompile.options.compilerArgs.clear()
+        javaCompile.options.compilerArgs.addAll(compilerArgs)
     }
 
     Task getMergeAssetsTask(Project project, String variantName) {

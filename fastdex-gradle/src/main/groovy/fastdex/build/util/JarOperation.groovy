@@ -164,9 +164,9 @@ public class JarOperation implements Opcodes {
                             className = className.replaceAll(Os.isFamily(Os.FAMILY_WINDOWS) ? "\\\\" : File.separator,"\\.")
 
                             for (String cn : changedClasses) {
-                                if (cn.equals(className) || className.startsWith("${cn}\$")
-                                        ////butterknife 8.2.0 以后生成的类MainActivity_ViewBinding.class、MainActivity_ViewBinding$1.class
-                                        || className.startsWith("${cn}_ViewBinding")) {
+                                if (cn.equals(className) || className.startsWith("${cn}\$")) {
+//                                        ////butterknife 8.2.0 以后生成的类MainActivity_ViewBinding.class、MainActivity_ViewBinding$1.class
+//                                        || className.startsWith("${cn}_ViewBinding")) {
 
                                     ZipEntry e = new ZipEntry(entryName)
                                     outputJarStream.putNextEntry(e)

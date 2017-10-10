@@ -254,4 +254,14 @@ public class GradleUtils {
     public static String getAndroidGradlePluginVersion() {
         return Version.ANDROID_GRADLE_PLUGIN_VERSION
     }
+
+    public static File getAptOutputDir(ApplicationVariant variant) {
+        if (GradleUtils.getAndroidGradlePluginVersion().compareTo("2.2") >= 0) {
+            //2.2.0以后才有getAnnotationProcessorOutputDir()这个api
+            return variant.getVariantData().getScope().getAnnotationProcessorOutputDir()
+        }
+        else {
+            return new File(variant.getVariantData().getScope().getGlobalScope().getGeneratedDir(), "/source/apt/${variant.dirName}")
+        }
+    }
 }

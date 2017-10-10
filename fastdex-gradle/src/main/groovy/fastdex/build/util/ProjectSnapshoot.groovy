@@ -45,56 +45,7 @@ public class ProjectSnapshoot {
         //load manifest
         File androidManifestStatFile = FastdexUtils.getAndroidManifestStatFile(project,fastdexVariant.variantName)
         oldAndManifestDirectorySnapshoot = AndManifestDirectorySnapshoot.load(androidManifestStatFile,AndManifestDirectorySnapshoot.class)
-
-
-        //TODO 暂时移除目录移动后的容错处理
-//        String oldProjectPath = fastdexVariant.metaInfo.projectPath
-//        String curProjectPath = project.projectDir.absolutePath
-//
-//        String oldRootProjectPath = fastdexVariant.metaInfo.rootProjectPath
-//        String curRootProjectPath = project.rootProject.projectDir.absolutePath
-//
-//        boolean isRootProjectDirChanged = fastdexVariant.metaInfo.isRootProjectDirChanged(curRootProjectPath)
-//
-//        if (isRootProjectDirChanged) {
-//            //已存在构建缓存的情况下,如果移动了项目目录要把缓存中的老的路径全部替换掉
-//            applyNewProjectDir(oldSourceSetSnapshoot,oldRootProjectPath,curRootProjectPath,curProjectPath)
-//            if (oldSourceSetSnapshoot.lastDiffResult != null) {
-//                oldSourceSetSnapshoot.lastDiffResult = null
-//            }
-//            //save
-//            saveSourceSetSnapshoot(oldSourceSetSnapshoot)
-//
-//            for (StringNode node : oldDependenciesSnapshoot.nodes) {
-//                node.string = replacePath(node.string,oldRootProjectPath,curRootProjectPath)
-//            }
-//            saveDependenciesSnapshoot(oldDependenciesSnapshoot)
-//
-//            fastdexVariant.metaInfo.projectPath = curProjectPath
-//            fastdexVariant.metaInfo.rootProjectPath = curRootProjectPath
-//            fastdexVariant.saveMetaInfo()
-//            project.logger.error("==fastdex restore cache, project path changed old: ${oldProjectPath} now: ${curProjectPath}")
-//        }
     }
-
-//    def applyNewProjectDir(SourceSetSnapshoot sourceSnapshoot,String oldRootProjectPath,String curRootProjectPath,String curProjectPath) {
-//        sourceSnapshoot.path = curProjectPath
-//        for (StringNode node : sourceSnapshoot.nodes) {
-//            node.setString(replacePath(node.getString(),oldRootProjectPath,curRootProjectPath))
-//        }
-//        for (JavaDirectorySnapshoot snapshoot : sourceSnapshoot.directorySnapshootSet) {
-//            snapshoot.path = replacePath(snapshoot.path,oldRootProjectPath,curRootProjectPath)
-//            snapshoot.projectPath = replacePath(snapshoot.projectPath,oldRootProjectPath,curRootProjectPath)
-//        }
-//    }
-
-//    def replacePath(String path,String s,String s1) {
-//        if (path.startsWith(s)) {
-//            path = path.substring(s.length());
-//            path = s1 + path;
-//        }
-//        return path;
-//    }
 
     def prepareEnv() {
         def project = fastdexVariant.project
@@ -187,33 +138,24 @@ public class ProjectSnapshoot {
                 rDir = fastdexVariant.androidVariant.getVariantData().getScope().getRClassSourceOutputDir()
                 rsDir = fastdexVariant.androidVariant.getVariantData().getScope().getRenderscriptSourceOutputDir()
                 aidlDir = fastdexVariant.androidVariant.getVariantData().getScope().getAidlSourceOutputDir()
-                if (GradleUtils.getAndroidGradlePluginVersion().compareTo("2.2") >= 0) {
-                    //2.2.0以后才有getAnnotationProcessorOutputDir()这个api
-                    aptDir = fastdexVariant.androidVariant.getVariantData().getScope().getAnnotationProcessorOutputDir()
-                }
-                else {
-                    aptDir = new File(project.buildDir,"generated${File.separator}source${File.separator}apt${File.separator}${libraryVariantdirName}${File.separator}")
-                }
+                aptDir = GradleUtils.getAptOutputDir(fastdexVariant.androidVariant)
             }
             else {
+                //TODO 需要处理library工程包含flavor的场景
                 buildConfigDir = new File(project.buildDir,"generated${File.separator}source${File.separator}buildConfig${File.separator}${libraryVariantdirName}${File.separator}")
                 rDir = new File(project.buildDir,"generated${File.separator}source${File.separator}r${File.separator}${libraryVariantdirName}${File.separator}")
                 rsDir = new File(project.buildDir,"generated${File.separator}source${File.separator}rs${File.separator}${libraryVariantdirName}${File.separator}")
                 aidlDir = new File(project.buildDir,"generated${File.separator}source${File.separator}aidl${File.separator}${libraryVariantdirName}${File.separator}")
                 aptDir = new File(project.buildDir,"generated${File.separator}source${File.separator}apt${File.separator}${libraryVariantdirName}${File.separator}")
             }
+            //buildconfig
             File buildConfigJavaFile = new File(buildConfigDir,buildConfigJavaRelativePath)
-            if (fastdexVariant.configuration.debug) {
-                fastdexVariant.project.logger.error("==fastdex buildConfigJavaFile: ${buildConfigJavaFile}")
-            }
             JavaDirectorySnapshoot buildConfigSnapshoot = new JavaDirectorySnapshoot(buildConfigDir,true,buildConfigJavaFile.absolutePath)
             buildConfigSnapshoot.projectPath = project.projectDir.absolutePath
             snapshoot.addJavaDirectorySnapshoot(buildConfigSnapshoot)
 
+            //r
             File rJavaFile = new File(rDir,rJavaRelativePath)
-            if (fastdexVariant.configuration.debug) {
-                fastdexVariant.project.logger.error("==fastdex rJavaFile: ${rJavaFile}")
-            }
             JavaDirectorySnapshoot rSnapshoot = new JavaDirectorySnapshoot(rDir,true,rJavaFile.absolutePath)
             rSnapshoot.projectPath = project.projectDir.absolutePath
             snapshoot.addJavaDirectorySnapshoot(rSnapshoot)
@@ -228,12 +170,10 @@ public class ProjectSnapshoot {
             aidlDirectorySnapshoot.projectPath = project.projectDir.absolutePath
             snapshoot.addJavaDirectorySnapshoot(aidlDirectorySnapshoot)
 
-            if (fastdexVariant.configuration.traceApt || FastdexUtils.isDataBindingEnabled(project)) {
-                //apt
-                JavaDirectorySnapshoot aptDirectorySnapshoot = new JavaDirectorySnapshoot(aptDir,new Exclude$SourceSuffixFilter(),true)
-                aptDirectorySnapshoot.projectPath = project.projectDir.absolutePath
-                snapshoot.addJavaDirectorySnapshoot(aptDirectorySnapshoot)
-            }
+            //apt
+            JavaDirectorySnapshoot aptDirectorySnapshoot = new JavaDirectorySnapshoot(aptDir,true)
+            aptDirectorySnapshoot.projectPath = project.projectDir.absolutePath
+            snapshoot.addJavaDirectorySnapshoot(aptDirectorySnapshoot)
         }
     }
 
